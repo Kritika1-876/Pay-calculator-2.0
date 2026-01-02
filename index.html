@@ -38,9 +38,7 @@ input,select,button {
   padding:6px;
   font-size:.9rem;
 }
-button {
-  cursor:pointer;
-}
+button { cursor:pointer; }
 .history-item {
   padding:8px;
   border-bottom:1px solid #eee;
@@ -51,9 +49,6 @@ button {
 }
 .holiday {
   background:#fff3cd;
-}
-@media(max-width:600px){
-  table { font-size:.8rem; }
 }
 </style>
 </head>
@@ -72,7 +67,7 @@ button {
 </div>
 
 <div class="card">
-<h3>Shift Log (Night = 6pm–6am / 12hrs)</h3>
+<h3>Shift Log (All shifts = 12 hrs)</h3>
 <table>
 <thead>
 <tr>
@@ -107,17 +102,22 @@ const RATES = {
   holiday: 800
 };
 const REGULAR_LIMIT = 80;
+const SHIFT_HOURS = 12;
 
-// ================= HOLIDAYS =================
-const JM_HOLIDAYS = [
-  "2025-01-01",
-  "2025-04-18",
-  "2025-04-21",
-  "2025-05-23",
-  "2025-08-06",
-  "2025-10-20",
-  "2025-12-25"
-];
+// ================= HOLIDAY ENGINE =================
+function isHoliday(dateStr) {
+  const d = new Date(dateStr);
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+
+  // Fixed Jamaican holidays
+  if (m === 1 && day === 1) return true;      // New Year's Day
+  if (m === 8 && day === 6) return true;      // Independence Day
+  if (m === 12 && day === 25) return true;    // Christmas
+  if (m === 12 && day === 26) return true;    // Boxing Day
+
+  return false;
+}
 
 // ================= STORAGE =================
 let app = JSON.parse(localStorage.getItem("payrollApp")) || { periods: [] };
@@ -145,8 +145,8 @@ function createPeriod(startOverride) {
     currentPeriod.shifts.push({
       date: d.toISOString().slice(0,10),
       worked:false,
-      type:"night",
-      hours:12,
+      type:"day",
+      hours:SHIFT_HOURS,
       location:""
     });
   }
@@ -166,19 +166,19 @@ function renderPeriod() {
   shiftTable.innerHTML = "";
 
   currentPeriod.shifts.forEach((s,i)=>{
-    const isHoliday = JM_HOLIDAYS.includes(s.date);
+    const holiday = isHoliday(s.date);
     shiftTable.innerHTML += `
-      <tr class="${isHoliday?'holiday':''}">
-        <td>${s.date}${isHoliday?' 🎉':''}</td>
+      <tr class="${holiday?'holiday':''}">
+        <td>${s.date}${holiday?' 🎉':''}</td>
         <td><input type="checkbox" ${s.worked?'checked':''}
           onchange="toggleWorked(${i},this.checked)"></td>
         <td>
           <select onchange="changeShift(${i},this.value)">
-            <option value="night" ${s.type==='night'?'selected':''}>Night</option>
             <option value="day" ${s.type==='day'?'selected':''}>Day</option>
+            <option value="night" ${s.type==='night'?'selected':''}>Night</option>
           </select>
         </td>
-        <td>${s.hours}</td>
+        <td>${SHIFT_HOURS}</td>
         <td><input value="${s.location}"
           onchange="setLocation(${i},this.value)"></td>
       </tr>`;
@@ -188,8 +188,6 @@ function renderPeriod() {
 function toggleWorked(i,v){ currentPeriod.shifts[i].worked = v; }
 function changeShift(i,v){
   currentPeriod.shifts[i].type = v;
-  currentPeriod.shifts[i].hours = v === "night" ? 12 : 8;
-  renderPeriod();
 }
 function setLocation(i,v){ currentPeriod.shifts[i].location = v; }
 
@@ -200,8 +198,8 @@ function calculatePayroll() {
 
   currentPeriod.shifts.forEach(s=>{
     if(!s.worked) return;
-    totalHours += s.hours;
-    if(JM_HOLIDAYS.includes(s.date)) holidayHours += s.hours;
+    totalHours += SHIFT_HOURS;
+    if(isHoliday(s.date)) holidayHours += SHIFT_HOURS;
   });
 
   const regularHours = Math.min(REGULAR_LIMIT, totalHours - holidayHours);
@@ -220,12 +218,7 @@ function calculatePayroll() {
   const paye = taxable > 69206 ? (taxable - 69206) * 0.25 : 0;
   const net = gross - (nis + nht + edu + paye);
 
-  currentPeriod.payroll = {
-    regularHours, overtimeHours, holidayHours,
-    regularPay, overtimePay, holidayPay,
-    gross, nis, nht, edu, paye, net
-  };
-
+  currentPeriod.payroll = { gross, net };
   app.periods.push(currentPeriod);
   localStorage.setItem("payrollApp", JSON.stringify(app));
   renderHistory();
@@ -235,11 +228,6 @@ function calculatePayroll() {
     Regular: ${regularHours} hrs → J$${regularPay.toFixed(2)}<br>
     Overtime: ${overtimeHours} hrs → J$${overtimePay.toFixed(2)}<br>
     Holiday: ${holidayHours} hrs → J$${holidayPay.toFixed(2)}<hr>
-    <b>Gross:</b> J$${gross.toFixed(2)}<br>
-    NIS: J$${nis.toFixed(2)}<br>
-    NHT: J$${nht.toFixed(2)}<br>
-    Education Tax: J$${edu.toFixed(2)}<br>
-    PAYE: J$${paye.toFixed(2)}<hr>
     <b>NET PAY:</b> J$${net.toFixed(2)}
   `;
 }

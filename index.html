@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bi-Weekly Payroll Calculator 🇯🇲</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+  margin:0;
+  font-family: system-ui, -apple-system;
+  background:#f2f4f7;
+}
+.container {
+  max-width:960px;
+  margin:auto;
+  padding:16px;
+}
+.card {
+  background:#fff;
+  border-radius:12px;
+  padding:16px;
+  margin-bottom:16px;
+  box-shadow:0 6px 14px rgba(0,0,0,.08);
+}
+h2,h3 { margin-top:0; }
+table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:.9rem;
+}
+th,td {
+  padding:6px;
+  border-bottom:1px solid #ddd;
+  text-align:center;
+}
+input,select,button {
+  padding:6px;
+  font-size:.9rem;
+}
+button {
+  cursor:pointer;
+}
+.history-item {
+  padding:8px;
+  border-bottom:1px solid #eee;
+}
+.small {
+  font-size:.85rem;
+  opacity:.7;
+}
+.holiday {
+  background:#fff3cd;
+}
+@media(max-width:600px){
+  table { font-size:.8rem; }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<div class="card">
+<h2>Bi-Weekly Period</h2>
+<label>Start Date:
+<input type="date" id="startDate">
+</label>
+<button onclick="createPeriod()">Create Period</button>
+<button onclick="nextPeriod()">➕ Next Bi-Weekly</button>
+<p id="periodLabel"></p>
+</div>
+
+<div class="card">
+<h3>Shift Log (Night = 6pm–6am / 12hrs)</h3>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Worked</th>
+<th>Shift</th>
+<th>Hours</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody id="shiftTable"></tbody>
+</table>
+</div>
+
+<div class="card">
+<button onclick="calculatePayroll()">Calculate Payroll</button>
+<div id="payrollResult"></div>
+</div>
+
+<div class="card">
+<h3>History</h3>
+<div id="history"></div>
+</div>
+
+</div>
+
+<script>
+// ================= CONFIG =================
+const RATES = {
+  regular: 400,
+  overtime: 600,
+  holiday: 800
+};
+const REGULAR_LIMIT = 80;
+
+// ================= HOLIDAYS =================
+const JM_HOLIDAYS = [
+  "2025-01-01",
+  "2025-04-18",
+  "2025-04-21",
+  "2025-05-23",
+  "2025-08-06",
+  "2025-10-20",
+  "2025-12-25"
+];
+
+// ================= STORAGE =================
+let app = JSON.parse(localStorage.getItem("payrollApp")) || { periods: [] };
+let currentPeriod = null;
+
+// ================= PERIOD =================
+function createPeriod(startOverride) {
+  const start = startOverride || startDate.value;
+  if (!start) return alert("Select start date");
+
+  const s = new Date(start);
+  const e = new Date(s);
+  e.setDate(e.getDate() + 13);
+
+  currentPeriod = {
+    id: `${start}_to_${e.toISOString().slice(0,10)}`,
+    start,
+    end: e.toISOString().slice(0,10),
+    shifts: []
+  };
+
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(s);
+    d.setDate(d.getDate() + i);
+    currentPeriod.shifts.push({
+      date: d.toISOString().slice(0,10),
+      worked:false,
+      type:"night",
+      hours:12,
+      location:""
+    });
+  }
+  renderPeriod();
+}
+
+function nextPeriod() {
+  if (!currentPeriod) return;
+  const d = new Date(currentPeriod.end);
+  d.setDate(d.getDate() + 1);
+  createPeriod(d.toISOString().slice(0,10));
+}
+
+// ================= RENDER =================
+function renderPeriod() {
+  periodLabel.textContent = `${currentPeriod.start} → ${currentPeriod.end}`;
+  shiftTable.innerHTML = "";
+
+  currentPeriod.shifts.forEach((s,i)=>{
+    const isHoliday = JM_HOLIDAYS.includes(s.date);
+    shiftTable.innerHTML += `
+      <tr class="${isHoliday?'holiday':''}">
+        <td>${s.date}${isHoliday?' 🎉':''}</td>
+        <td><input type="checkbox" ${s.worked?'checked':''}
+          onchange="toggleWorked(${i},this.checked)"></td>
+        <td>
+          <select onchange="changeShift(${i},this.value)">
+            <option value="night" ${s.type==='night'?'selected':''}>Night</option>
+            <option value="day" ${s.type==='day'?'selected':''}>Day</option>
+          </select>
+        </td>
+        <td>${s.hours}</td>
+        <td><input value="${s.location}"
+          onchange="setLocation(${i},this.value)"></td>
+      </tr>`;
+  });
+}
+
+function toggleWorked(i,v){ currentPeriod.shifts[i].worked = v; }
+function changeShift(i,v){
+  currentPeriod.shifts[i].type = v;
+  currentPeriod.shifts[i].hours = v === "night" ? 12 : 8;
+  renderPeriod();
+}
+function setLocation(i,v){ currentPeriod.shifts[i].location = v; }
+
+// ================= PAYROLL =================
+function calculatePayroll() {
+  let totalHours = 0;
+  let holidayHours = 0;
+
+  currentPeriod.shifts.forEach(s=>{
+    if(!s.worked) return;
+    totalHours += s.hours;
+    if(JM_HOLIDAYS.includes(s.date)) holidayHours += s.hours;
+  });
+
+  const regularHours = Math.min(REGULAR_LIMIT, totalHours - holidayHours);
+  const overtimeHours = Math.max(0, totalHours - holidayHours - REGULAR_LIMIT);
+
+  const regularPay = regularHours * RATES.regular;
+  const overtimePay = overtimeHours * RATES.overtime;
+  const holidayPay = holidayHours * RATES.holiday;
+
+  const gross = regularPay + overtimePay + holidayPay;
+
+  const nis = gross * 0.03;
+  const nht = gross * 0.02;
+  const edu = gross * 0.0225;
+  const taxable = gross - nis - nht - edu;
+  const paye = taxable > 69206 ? (taxable - 69206) * 0.25 : 0;
+  const net = gross - (nis + nht + edu + paye);
+
+  currentPeriod.payroll = {
+    regularHours, overtimeHours, holidayHours,
+    regularPay, overtimePay, holidayPay,
+    gross, nis, nht, edu, paye, net
+  };
+
+  app.periods.push(currentPeriod);
+  localStorage.setItem("payrollApp", JSON.stringify(app));
+  renderHistory();
+
+  payrollResult.innerHTML = `
+    <h3>Pay Breakdown</h3>
+    Regular: ${regularHours} hrs → J$${regularPay.toFixed(2)}<br>
+    Overtime: ${overtimeHours} hrs → J$${overtimePay.toFixed(2)}<br>
+    Holiday: ${holidayHours} hrs → J$${holidayPay.toFixed(2)}<hr>
+    <b>Gross:</b> J$${gross.toFixed(2)}<br>
+    NIS: J$${nis.toFixed(2)}<br>
+    NHT: J$${nht.toFixed(2)}<br>
+    Education Tax: J$${edu.toFixed(2)}<br>
+    PAYE: J$${paye.toFixed(2)}<hr>
+    <b>NET PAY:</b> J$${net.toFixed(2)}
+  `;
+}
+
+// ================= HISTORY =================
+function renderHistory() {
+  history.innerHTML = "";
+  app.periods.forEach(p=>{
+    history.innerHTML += `
+      <div class="history-item">
+        ${p.start} → ${p.end}<br>
+        <span class="small">Net: J$${p.payroll.net.toFixed(2)}</span>
+      </div>`;
+  });
+}
+renderHistory();
+</script>
+</body>
+</html>
